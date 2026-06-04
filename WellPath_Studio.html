@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WellPath Studio</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --accent: #58a6ff; --accent2: #3fb950; --warn: #f78166;
+    --text: #e6edf3; --muted: #8b949e; --radius: 6px;
+    --font: 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background:var(--bg); color:var(--text); font-family:var(--font); font-size:13px; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+  /* ── Top bar ── */
+  #topbar { display:flex; align-items:center; gap:10px; padding:7px 14px; background:var(--panel); border-bottom:1px solid var(--border); flex-shrink:0; flex-wrap:wrap; }
+  #topbar h1 { font-size:14px; font-weight:600; color:var(--accent); letter-spacing:.5px; white-space:nowrap; }
+  .sep { width:1px; height:24px; background:var(--border); flex-shrink:0; }
+  #db-name { font-size:12px; color:var(--accent2); font-weight:500; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #db-name.none { color:var(--muted); }
+
+  /* ── Buttons & File Inputs ── */
+  .btn { padding:5px 11px; background:#21262d; border:1px solid var(--border); border-radius:var(--radius); color:var(--text); cursor:pointer; white-space:nowrap; font-size:12px; transition:background .13s, border-color .13s; display:inline-flex; align-items:center; }
+  .btn:hover { background:#30363d; border-color:var(--accent); }
+  .btn:disabled { background:#161b22; border-color:var(--border); color:var(--muted); cursor:not-allowed; }
+  .file-btn { position:relative; overflow:hidden; cursor:pointer; gap:6px; }
+  .file-btn input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+
+  /* ── Main Layout ── */
+  #main { display:flex; flex:1; min-height:0; }
+
+  /* ── Sidebar ── */
+  #sidebar { width:260px; flex-shrink:0; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
+  .sb-section { padding:10px 12px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; flex:1; overflow:hidden; }
+  .sb-section h2 { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin-bottom:8px; }
+  #well-search { width:100%; padding:5px 8px; background:#0d1117; border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:12px; margin-bottom:6px; outline:none; }
+  #well-search:focus { border-color:var(--accent); }
+  .select-row { display:flex; gap:5px; margin-bottom:6px; }
+  .select-row .btn { flex:1; font-size:11px; padding:3px 0; justify-content:center; }
+  #well-list-wrap { flex:1; overflow-y:auto; padding:5px; }
+  #well-list-wrap::-webkit-scrollbar { width:5px; }
+  #well-list-wrap::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+  .well-item { display:flex; align-items:center; gap:8px; padding:5px 7px; border-radius:var(--radius); cursor:pointer; border:1px solid transparent; transition:background .1s; }
+  .well-item:hover { background:#21262d; }
+  .well-item.selected { background:#1f3a52; border-color:#1f6feb44; }
+  .well-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .well-name { flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .well-check { width:13px; height:13px; accent-color:var(--accent); cursor:pointer; }
+  .well-actions { display:flex; gap:3px; opacity:0; transition:opacity .13s; }
+  .well-item:hover .well-actions { opacity:1; }
+  .edit-well, .del-well { font-size:11px; color:var(--muted); cursor:pointer; padding:1px 4px; border-radius:3px; }
+  .edit-well:hover { color:var(--accent); background:#1f3a52; }
+  .del-well:hover { color:var(--warn); background:#3d1a1a; }
+
+  /* ── Workspace ── */
+  #right { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #toolbar { display:flex; align-items:center; gap:8px; padding:6px 12px; background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap; flex-shrink:0; }
+  .tt-group { display:flex; gap:4px; flex-wrap:wrap; }
+  .tt-toggle { display:flex; align-items:center; gap:4px; padding:3px 8px; background:#21262d; border:1px solid var(--border); border-radius:var(--radius); cursor:pointer; font-size:11px; color:var(--muted); transition:all .12s; user-select:none; }
+  .tt-toggle input { display:none; }
+  .tt-toggle.on { background:#1f3a52; border-color:var(--accent); color:var(--accent); }
+  .filter-table { border-collapse:collapse; }
+  .filter-table th, .filter-table td { padding:2px 5px; font-size:11px; color:var(--muted); }
+  .filter-table th { color:var(--text); }
+  .filter-table input[type=number] { width:62px; padding:3px 5px; background:#0d1117; border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:11px; outline:none; }
+  .filter-table input[type=number]:focus { border-color:var(--accent); }
+  .view-group { display:flex; gap:4px; }
+  #wellSelector { padding:4px 8px; background:#21262d; border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:12px; outline:none; }
+  #wellSelector:focus { border-color:var(--accent); }
+
+  /* ── Plot states ── */
+  #plot { flex:1; min-height:0; display:none; }
+  #empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--muted); gap:12px; }
+  #empty-state svg { opacity:.25; }
+  #empty-state .es-title { font-size:15px; color:var(--text); opacity:.5; }
+  #empty-state .es-sub { font-size:12px; text-align:center; line-height:1.7; max-width:340px; }
+  .steps { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+  .step { display:flex; align-items:center; gap:10px; font-size:12px; }
+  .step-num { width:22px; height:22px; border-radius:50%; background:#21262d; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; color:var(--accent); flex-shrink:0; }
+
+  /* ── Log terminal ── */
+  #log-bar { background:#0d1117; border-top:1px solid var(--border); font-size:11px; color:var(--muted); padding:3px 10px; flex-shrink:0; display:flex; gap:8px; align-items:center; max-height:26px; overflow:hidden; transition:max-height .2s; }
+  #log-bar.expanded { max-height:160px; overflow-y:auto; flex-direction:column; align-items:flex-start; }
+  #log-bar.expanded #log-toggle { align-self:flex-end; }
+  #log-msgs { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #log-bar.expanded #log-msgs { white-space:normal; width:100%; }
+  #log-toggle { font-size:10px; padding:1px 6px; background:#21262d; border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--muted); flex-shrink:0; }
+
+  /* ── Overlays ── */
+  #loading { display:none; position:fixed; inset:0; background:rgba(13,17,23,.8); align-items:center; justify-content:center; z-index:999; flex-direction:column; gap:12px; }
+  #loading.show { display:flex; }
+  .spinner { width:34px; height:34px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  #loading p { color:var(--text); font-size:13px; }
+  #toast { position:fixed; bottom:34px; right:16px; padding:7px 13px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:12px; z-index:1000; opacity:0; transform:translateY(6px); transition:opacity .2s, transform .2s; pointer-events:none; }
+  #toast.show { opacity:1; transform:none; }
+  #toast.ok { border-color:var(--accent2); color:var(--accent2); }
+  #toast.err { border-color:var(--warn); color:var(--warn); }
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="spinner"></div><p id="loading-msg">Processing...</p></div>
+<div id="toast"></div>
+
+<div id="topbar">
+  <h1>⬡ WellPath Studio</h1>
+  <div class="sep"></div>
+
+  <label class="btn file-btn" title="Open an existing local .sqlite file">
+    📂 Open DB
+    <input type="file" id="btn-open-db" accept=".sqlite,.db,.sqlite3">
+  </label>
+  
+  <button class="btn" id="btn-new-db" title="Create a new in-memory database">✚ New DB</button>
+  <button class="btn" id="btn-save-db" title="Download current database snapshot" disabled>💾 Save DB</button>
+
+  <div class="sep"></div>
+
+  <label class="btn file-btn" title="Import COMPASS .txt survey log files into active DB">
+    ＋ Import .txt
+    <input type="file" id="import-txt" accept=".txt" multiple disabled>
+  </label>
+
+  <div class="sep"></div>
+  <span id="db-name" class="none">No active database</span>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div class="sb-section">
+      <h2>Database Wells</h2>
+      <input type="text" id="well-search" placeholder="Search well..." disabled>
+      <div class="select-row">
+        <button class="btn" id="btn-sel-all" disabled>All</button>
+        <button class="btn" id="btn-sel-none" disabled>None</button>
+      </div>
+      <div id="well-list-wrap">
+        <div id="well-list"><div style="color:var(--muted);font-size:12px;padding:8px;">Open or create a database first.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="right">
+    <div id="toolbar">
+      <div class="tt-group" id="tt-group">
+        <label class="tt-toggle on"><input type="checkbox" class="tt-option" value="MD" checked><span>MD</span></label>
+        <label class="tt-toggle on"><input type="checkbox" class="tt-option" value="TVD" checked><span>TVD</span></label>
+        <label class="tt-toggle on"><input type="checkbox" class="tt-option" value="INC" checked><span>INC</span></label>
+        <label class="tt-toggle on"><input type="checkbox" class="tt-option" value="AZI" checked><span>AZI</span></label>
+        <label class="tt-toggle on"><input type="checkbox" class="tt-option" value="DLS" checked><span>DLS</span></label>
+        <label class="tt-toggle on"><input type="checkbox" class="tt-option" value="DIST" checked><span>C-C</span></label>
+        <label class="tt-toggle on"><input type="checkbox" class="tt-option" value="CLOSEST" checked><span>Closest</span></label>
+        <label class="tt-toggle on"><input type="checkbox" class="tt-option" value="DIST_SELECTED" checked><span>C-C Sel.</span></label>
+      </div>
+      <div class="sep"></div>
+      <table class="filter-table">
+        <tr><th></th><th>Min</th><th>Max</th></tr>
+        <tr><td>TVD</td><td><input type="number" id="tvdFrom" placeholder="—"></td><td><input type="number" id="tvdTo" placeholder="—"></td></tr>
+        <tr><td>X</td><td><input type="number" id="xFrom" placeholder="—"></td><td><input type="number" id="xTo" placeholder="—"></td></tr>
+        <tr><td>Y</td><td><input type="number" id="yFrom" placeholder="—"></td><td><input type="number" id="yTo" placeholder="—"></td></tr>
+      </table>
+      <div class="sep"></div>
+      <div class="view-group">
+        <button class="btn" id="btnPlan">Plan</button>
+        <button class="btn" id="btnSection">W–E</button>
+        <button class="btn active" id="btn3D">3D</button>
+      </div>
+      <div class="sep"></div>
+      <select id="wellSelector"><option value="">C-C vs well...</option></select>
+    </div>
+
+    <div id="empty-state">
+      <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+        <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/>
+      </svg>
+      <span class="es-title">No data loaded</span>
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><span>Open an existing database <b>(.sqlite)</b> or hit <b>New DB</b></span></div>
+        <div class="step"><div class="step-num">2</div><span>Import COMPASS <b>.txt</b> logs to dynamically append traces</span></div>
+        <div class="step"><div class="step-num">3</div><span>Check or uncheck wells on the left to map them instantly</span></div>
+      </div>
+    </div>
+    <div id="plot"></div>
+
+    <div id="log-bar">
+      <span id="log-msgs">Initializing relational database engine...</span>
+      <button id="log-toggle">▲ Log</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  GLOBALS
+// ═══════════════════════════════════════════════
+let SQL = null;
+let db = null;
+let dbFileName = null;
+let wells = [], traces = [], traceVisibility = [];
+let currentView = '3D';
+let wellListData = [];
+let isPlotInitialized = false;
+
+const COLORS = ['#636EFA','#EF553B','#00CC96','#AB63FA','#FFA15A',
+                '#19D3F3','#FF6692','#B6E880','#FF97FF','#FECB52',
+                '#72B7B2','#EECA3B','#FF9DA6','#B279A2','#E15759'];
+
+// ═══════════════════════════════════════════════
+//  SYSTEM LOG & TOASTS
+// ═══════════════════════════════════════════════
+let logLines = [];
+function log(msg, type=''){
+  logLines.push({msg, type});
+  if(logLines.length > 300) logLines.shift();
+  const bar = document.getElementById('log-bar');
+  if(bar.classList.contains('expanded')){
+    renderLog();
+  } else {
+    const el = document.getElementById('log-msgs');
+    el.textContent = msg;
+    el.style.color = type==='ok'?'#3fb950':type==='err'?'#f78166':'#8b949e';
+  }
+}
+function renderLog(){
+  document.getElementById('log-msgs').innerHTML = logLines.map(l=>
+    `<div style="color:${l.type==='ok'?'#3fb950':l.type==='err'?'#f78166':'#8b949e'}">${l.msg}</div>`
+  ).join('');
+}
+
+let toastTimer;
+function toast(msg, type=''){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ t.className=''; }, 2800);
+}
+
+function showLoading(msg='Processing...'){
+  document.getElementById('loading-msg').textContent = msg;
+  document.getElementById('loading').classList.add('show');
+}
+function hideLoading(){ document.getElementById('loading').classList.remove('show'); }
+
+function setDbActive(fileName){
+  dbFileName = fileName;
+  const el = document.getElementById('db-name');
+  if(fileName){
+    el.textContent = '● ' + fileName;
+    el.className = '';
+    document.getElementById('btn-save-db').disabled = false;
+    document.getElementById('import-txt').disabled = false;
+    document.getElementById('well-search').disabled = false;
+    document.getElementById('btn-sel-all').disabled = false;
+    document.getElementById('btn-sel-none').disabled = false;
+  } else {
+    el.textContent = 'No active database';
+    el.className = 'none';
+    document.getElementById('btn-save-db').disabled = true;
+    document.getElementById('import-txt').disabled = true;
+    document.getElementById('well-search').disabled = true;
+    document.getElementById('btn-sel-all').disabled = true;
+    document.getElementById('btn-sel-none').disabled = true;
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  SQL.JS WORKER ARCHITECTURE (LOCAL COMPATIBLE)
+// ═══════════════════════════════════════════════
+async function initSQLjs(){
+  log('Loading SQL.js WebAssembly engine...');
+  SQL = await initSqlJs({
+    locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`
+  });
+  log('SQL.js Engine compiled and running directly inside browser memory sandbox', 'ok');
+}
+
+function createSchema(){
+  db.run(`
+    CREATE TABLE IF NOT EXISTS wells (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      wellbore TEXT, design TEXT,
+      surface_x REAL, surface_y REAL,
+      rkb_msl REAL, water_depth REAL,
+      imported_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS survey_points (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      well_id INTEGER NOT NULL,
+      md REAL, inc REAL, azi REAL,
+      tvd REAL, tvdss REAL,
+      x REAL, y REAL, ns REAL, ew REAL, dls REAL,
+      FOREIGN KEY(well_id) REFERENCES wells(id)
+    );
+  `);
+}
+
+// ═══════════════════════════════════════════════
+//  PORTABLE IO ROUTINES (NO SERVER REQUIRED)
+// ═══════════════════════════════════════════════
+document.getElementById('btn-new-db').addEventListener('click', () => {
+  if (!SQL) { toast('SQL engine is not ready yet', 'err'); return; }
+  db = new SQL.Database();
+  createSchema();
+  setDbActive('New_Database.sqlite');
+  refreshWellList();
+  log('Created a blank relational schema inside virtual RAM. Use "Save DB" to download file.', 'ok');
+  toast('New DB instantiated', 'ok');
+});
+
+document.getElementById('btn-open-db').addEventListener('change', function(e) {
+  if (!SQL) { toast('SQL engine is not ready yet', 'err'); return; }
+  const file = e.target.files[0];
+  if (!file) return;
+
+  showLoading('Reading local binary block...');
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      const arr = new Uint8Array(ev.target.result);
+      db = new SQL.Database(arr);
+      createSchema();
+      setDbActive(file.name);
+      refreshWellList();
+      const n = wellListData.length;
+      log(`Database successfully parsed: ${file.name} [Found ${n} wells]`, 'ok');
+      toast(`${file.name} loaded`, 'ok');
+    } catch (err) {
+      log('SQL Parse Error: ' + err.message, 'err');
+      toast('Invalid database file format', 'err');
+    } finally {
+      hideLoading();
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  this.value = ''; 
+});
+
+document.getElementById('btn-save-db').addEventListener('click', () => {
+  if(!db) return;
+  try {
+    const data = db.export();
+    const blob = new Blob([data], {type: 'application/octet-stream'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = dbFileName || 'well_database.sqlite';
+    a.click();
+    URL.revokeObjectURL(url);
+    log(`Database successfully streamed to browser downloads: ${dbFileName || 'well_database.sqlite'}`, 'ok');
+    toast(`Database downloaded`, 'ok');
+  } catch (err) {
+    log('Export Pipeline Failed: ' + err.message, 'err');
+    toast('Error saving DB', 'err');
+  }
+});
+
+// ═══════════════════════════════════════════════
+//  COMPASS SURVEY LOG PARSER
+// ═══════════════════════════════════════════════
+function parseTxt(text){
+  const lines = text.split(/\r?\n/);
+  const meta = {}; const points = [];
+  for(const line of lines){
+    const l = line.trim();
+    if(l.startsWith('WELL ') || l.match(/^WELL\s*:/))      meta.well      = l.replace(/^WELL\s*:\s*/,'').trim();
+    else if(l.startsWith('WELLBORE'))  meta.wellbore   = l.replace(/^WELLBORE\s*:\s*/,'').trim();
+    else if(l.startsWith('DESIGN'))    meta.design     = l.replace(/^DESIGN\s*:\s*/,'').trim();
+    else if(l.startsWith('Surface EW')) meta.surface_x = parseFloat(l.replace(/[^0-9.]/g,''));
+    else if(l.startsWith('Surface NS')) meta.surface_y = parseFloat(l.replace(/[^0-9.]/g,''));
+    else if(l.startsWith('RKB-MSL'))   meta.rkb_msl    = parseFloat(l.replace(/[^0-9.]/g,''));
+    else if(l.startsWith('Water Depth')) meta.water_depth = parseFloat(l.replace(/[^0-9.]/g,''));
+  }
+  for(const line of lines){
+    const l = line.trim();
+    if(!l || l.startsWith('-') || l.startsWith('COMPASS') || l.startsWith('EXPORT') ||
+       l.startsWith('WELL') || l.startsWith('WELLBORE') || l.startsWith('DESIGN') ||
+       l.startsWith('Surface') || l.startsWith('Datum') || l.startsWith('RKB') ||
+       l.startsWith('Water') || l.startsWith('North') || l.startsWith('Geo') ||
+       l.startsWith('Map') || l.startsWith('SURVEY') || l.startsWith('MD') ||
+       l.startsWith('m RKB')) continue;
+
+    const parts = l.split(/\s+/).map(Number);
+    if(parts.length >= 10 && !isNaN(parts[0]) && !isNaN(parts[1])){
+      const [md, inc, azi, tvd, tvdss, x, y, ns, ew, dls] = parts;
+      points.push({ md, inc, azi, tvd, tvdss, x, y, ns, ew, dls: dls||0 });
+    }
+  }
+  if(!meta.well) throw new Error('WELL identifier token missing inside log file');
+  if(points.length === 0) throw new Error('No trajectory survey coordinates detected');
+  if(!meta.surface_x && points.length) meta.surface_x = points[0].x;
+  if(!meta.surface_y && points.length) meta.surface_y = points[0].y;
+  return { meta, points };
+}
+
+function insertWell(meta, points){
+  db.run(`INSERT OR REPLACE INTO wells (name,wellbore,design,surface_x,surface_y,rkb_msl,water_depth) VALUES (?,?,?,?,?,?,?)`,
+    [meta.well, meta.wellbore||'', meta.design||'', meta.surface_x||0, meta.surface_y||0, meta.rkb_msl||0, meta.water_depth||0]);
+  const res = db.exec(`SELECT id FROM wells WHERE name=?`, [meta.well]);
+  const wellId = res[0].values[0][0];
+  db.run(`DELETE FROM survey_points WHERE well_id=?`, [wellId]);
+  const stmt = db.prepare(`INSERT INTO survey_points (well_id,md,inc,azi,tvd,tvdss,x,y,ns,ew,dls) VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+  for(const p of points) stmt.run([wellId,p.md,p.inc,p.azi,p.tvd,p.tvdss,p.x,p.y,p.ns,p.ew,p.dls]);
+  stmt.free();
+}
+
+document.getElementById('import-txt').addEventListener('change', async function(e){
+  if(!db){ toast('Open or create a database first','err'); return; }
+  const files = [...e.target.files]; if(!files.length) return;
+  showLoading(`Parsing ${files.length} flat text logs...`);
+  let ok=0, fail=0;
+  for(const f of files){
+    await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          const {meta, points} = parseTxt(ev.target.result);
+          insertWell(meta, points);
+          log(`✓ Parsed: ${meta.well} (${points.length} points mapped to DB)`, 'ok');
+          ok++;
+        } catch(err){ log(`✗ Skip ${f.name}: ${err.message}`, 'err'); fail++; }
+        resolve();
+      };
+      reader.readAsText(f);
+    });
+  }
+  refreshWellList(); hideLoading();
+  if(ok)   toast(`${ok} log(s) appended`, 'ok');
+  if(fail) toast(`${fail} files skipped`, 'err');
+  this.value = '';
+});
+
+// ═══════════════════════════════════════════════
+//  UI CONTROL & REACTIVE LIST ENGINE
+// ═══════════════════════════════════════════════
+function refreshWellList(){
+  if(!db) return;
+  const res = db.exec(`SELECT id, name FROM wells ORDER BY name`);
+  const rows = res.length ? res[0].values : [];
+  wellListData = rows.map(r => ({id:r[0], name:r[1], selected:true}));
+  renderWellList();
+  triggerAutoVisualize();
+}
+
+function renderWellList(){
+  const filter = document.getElementById('well-search').value.toLowerCase();
+  const container = document.getElementById('well-list');
+  const filtered = wellListData.filter(w => w.name.toLowerCase().includes(filter));
+  if(!filtered.length){
+    container.innerHTML = `<div style="color:var(--muted);font-size:12px;padding:8px;">${wellListData.length?'No search matches.':'Database currently empty.'}</div>`;
+    return;
+  }
+  container.innerHTML = '';
+  filtered.forEach(w => {
+    // Sincronización absoluta del color basada en su índice global invariable de base de datos
+    const globalIdx = wellListData.findIndex(item => item.id === w.id);
+    const color = COLORS[globalIdx % COLORS.length];
+    
+    const div = document.createElement('div');
+    div.className = 'well-item' + (w.selected?' selected':'');
+    div.innerHTML = `
+      <div class="well-dot" style="background:${color}"></div>
+      <span class="well-name" title="${w.name}">${w.name}</span>
+      <div class="well-actions">
+        <span class="edit-well" title="Rename trace">✎</span>
+        <span class="del-well" title="Remove trace">✕</span>
+      </div>
+      <input type="checkbox" class="well-check" ${w.selected?'checked':''}>
+    `;
+    
+    div.querySelector('.well-check').addEventListener('change', ev => {
+      w.selected = ev.target.checked; 
+      div.classList.toggle('selected', w.selected); 
+      triggerAutoVisualize();
+    });
+    
+    div.querySelector('.edit-well').addEventListener('click', ev => {
+      ev.stopPropagation();
+      const newName = prompt(`Modify structural name for well trace:`, w.name);
+      if(!newName || newName.trim() === '' || newName === w.name) return;
+      const check = db.exec(`SELECT id FROM wells WHERE name=?`, [newName.trim()]);
+      if(check.length > 0) { toast(`Identifier already exists`, 'err'); return; }
+      db.run(`UPDATE wells SET name=? WHERE id=?`, [newName.trim(), w.id]);
+      refreshWellList(); toast(`Renamed`, 'ok');
+    });
+    
+    div.querySelector('.del-well').addEventListener('click', ev => {
+      ev.stopPropagation();
+      if(!confirm(`Remove ${w.name} completely from internal schema?`)) return;
+      db.run(`DELETE FROM survey_points WHERE well_id=?`, [w.id]);
+      db.run(`DELETE FROM wells WHERE id=?`, [w.id]);
+      refreshWellList(); toast(`Dropped table references`, 'err');
+    });
+    
+    div.addEventListener('click', ev => {
+      if(ev.target.classList.contains('del-well') || ev.target.classList.contains('edit-well') || ev.target.classList.contains('well-check')) return;
+      w.selected = !w.selected; 
+      div.querySelector('.well-check').checked = w.selected; 
+      div.classList.toggle('selected', w.selected); 
+      triggerAutoVisualize();
+    });
+    container.appendChild(div);
+  });
+}
+
+document.getElementById('btn-sel-all').addEventListener('click',()=>{ wellListData.forEach(w=>w.selected=true); renderWellList(); triggerAutoVisualize(); });
+document.getElementById('btn-sel-none').addEventListener('click',()=>{ wellListData.forEach(w=>w.selected=false); renderWellList(); triggerAutoVisualize(); });
+document.getElementById('well-search').addEventListener('input', renderWellList);
+
+// ═══════════════════════════════════════════════
+//  DATA PIPELINE & AUTOMATIC CALCULATIONS
+// ═══════════════════════════════════════════════
+function triggerAutoVisualize() {
+  const selected = wellListData.filter(w=>w.selected); 
+  if(!selected.length) {
+    document.getElementById('empty-state').style.display='flex';
+    document.getElementById('plot').style.display='none';
+    wells = []; traces = [];
+    return;
+  }
+  
+  try {
+    wells=[]; traces=[]; traceVisibility=[];
+    selected.forEach((w) => {
+      const res = db.exec(`SELECT md,inc,azi,tvd,x,y,dls FROM survey_points WHERE well_id=? ORDER BY md`, [w.id]);
+      if(!res.length||!res[0].values.length) return;
+      const md=[], inc=[], azi=[], tvd=[], x=[], y=[], dls=[];
+      res[0].values.forEach(r=>{ md.push(r[0]);inc.push(r[1]);azi.push(r[2]);tvd.push(r[3]);x.push(r[4]);y.push(r[5]);dls.push(r[6]||0); });
+      
+      // Capturar y fijar de forma estricta el color global del pozo original
+      const globalIdx = wellListData.findIndex(item => item.id === w.id);
+      const wellColor = COLORS[globalIdx % COLORS.length];
+
+      wells.push({name:w.name, MD:md, INC:inc, AZI:azi, TVD:tvd, x, y, z:tvd.slice(), DLS:dls, color: wellColor});
+    });
+
+    wells = wells.map(w => resampleWell(w, 5));
+    
+    wells.forEach((w,wi)=>{
+      const custom = w.MD.map((mdVal,pi)=>{
+        const px=w.x[pi], py=w.y[pi], pz=w.z[pi];
+        let minD=Infinity, closest='N/A';
+        wells.forEach((o,oi)=>{ if(oi===wi) return;
+          o.x.forEach((ox,j)=>{ const d=Math.sqrt((px-ox)**2+(py-o.y[j])**2+(pz-o.z[j])**2); if(d<minD){minD=d;closest=o.name;} }); });
+        return {md:mdVal, tvd:w.TVD[pi], inc:w.INC[pi], azi:w.AZI[pi], dls:w.DLS[pi], dist:minD, closest, dist_selected:NaN};
+      });
+      traces.push({
+        type:'scatter3d',
+        mode:'lines',
+        name:w.name,
+        x:w.x,y:w.y,z:w.z,
+        line:{width:4, color: w.color}, // Sincronizado exactamente con el color de la izquierda
+        customdata:custom
+      });
+    });
+
+    traceVisibility = wells.map(()=>true);
+    const sel = document.getElementById('wellSelector');
+    sel.innerHTML = '<option value="">C-C vs well...</option>';
+    wells.forEach(w=>{ const o=document.createElement('option'); o.value=w.name; o.textContent=w.name; sel.appendChild(o); });
+
+    document.getElementById('empty-state').style.display='none';
+    document.getElementById('plot').style.display='block';
+    
+    isPlotInitialized = false; 
+    updatePlot();
+  } catch(e){ log('Canvas Error: '+e.message,'err'); }
+}
+
+function resampleWell(w, step=5){
+  const mdMin=Math.min(...w.MD), mdMax=Math.max(...w.MD), newMD=[];
+  for(let m=mdMin;m<=mdMax;m+=step) newMD.push(m);
+  const interp = arr => newMD.map(m=>{
+    for(let i=1;i<w.MD.length;i++){
+      const m1=w.MD[i-1],m2=w.MD[i];
+      if(m>=m1&&m<=m2){ const t=(m-m1)/(m2-m1); return arr[i-1]+t*(arr[i]-arr[i-1]); }
+    }
+    return arr[arr.length-1];
+  });
+  return {name:w.name, MD:newMD, x:interp(w.x), y:interp(w.y), z:interp(w.TVD), TVD:interp(w.TVD), INC:interp(w.INC), AZI:interp(w.AZI), DLS:interp(w.DLS), color: w.color};
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER ENGINE (PLOTLY MULTI-VIEW)
+// ═══════════════════════════════════════════════
+function captureVisibility(){
+  const p=document.getElementById('plot'); if(!p || !p.data) return;
+  traceVisibility = p.data.map(tr=>tr.visible!=='legendonly');
+}
+function restoreVisibility(){
+  const p=document.getElementById('plot'); if(!p || !p.data) return;
+  traceVisibility.forEach((vis,idx)=>{ if(p.data[idx]) p.data[idx].visible=vis?true:'legendonly'; });
+  Plotly.redraw('plot');
+}
+
+function getFilteredTraces(){
+  const tvdFrom=parseFloat(document.getElementById('tvdFrom').value);
+  const tvdTo  =parseFloat(document.getElementById('tvdTo').value);
+  const xFrom  =parseFloat(document.getElementById('xFrom').value);
+  const xTo    =parseFloat(document.getElementById('xTo').value);
+  const yFrom  =parseFloat(document.getElementById('yFrom').value);
+  const yTo    =parseFloat(document.getElementById('yTo').value);
+  return wells.map((w,wi)=>{
+    const idx=w.TVD.map((t,i)=>{
+      const xi=w.x[i],yi=w.y[i];
+      if((isNaN(tvdFrom)||t>=tvdFrom)&&(isNaN(tvdTo)||t<=tvdTo)&&
+         (isNaN(xFrom)||xi>=xFrom)&&(isNaN(xTo)||xi<=xTo)&&
+         (isNaN(yFrom)||yi>=yFrom)&&(isNaN(yTo)||yi<=yTo)) return i; return -1;
+    }).filter(i=>i>=0);
+    const t=traces[wi];
+    const tr={...t, x:idx.map(i=>w.x[i]), y:idx.map(i=>w.y[i]), z:idx.map(i=>w.z[i]), customdata:idx.map(i=>t.customdata[i])};
+    if(currentView==='Plan')    tr.z=idx.map(()=>0);
+    if(currentView==='Section') tr.y=idx.map(()=>0);
+    return tr;
+  });
+}
+
+function updatePlot(){
+  if(!wells.length) return;
+  captureVisibility();
+  const selVals=[...document.querySelectorAll('.tt-option:checked')].map(c=>c.value);
+  const data=getFilteredTraces();
+  data.forEach(tr=>{
+    let ht=`<b>${tr.name}</b><br>`;
+    if(selVals.includes('MD'))           ht+=`MD: %{customdata.md:.0f} m<br>`;
+    if(selVals.includes('TVD'))          ht+=`TVD: %{customdata.tvd:.1f} m<br>`;
+    if(selVals.includes('INC'))          ht+=`INC: %{customdata.inc:.1f}°<br>`;
+    if(selVals.includes('AZI'))          ht+=`AZI: %{customdata.azi:.0f}°<br>`;
+    if(selVals.includes('DLS'))          ht+=`DLS: %{customdata.dls:.1f}°/30m<br>`;
+    if(selVals.includes('DIST'))         ht+=`C-C: %{customdata.dist:.1f} m<br>`;
+    if(selVals.includes('CLOSEST'))      ht+=`Closest: %{customdata.closest}<br>`;
+    if(selVals.includes('DIST_SELECTED')) ht+=`C-C Sel.: %{customdata.dist_selected:.1f} m<br>`;
+    tr.hovertemplate=ht+`<extra></extra>`;
+  });
+
+  const layout = {
+    paper_bgcolor:'#0d1117', plot_bgcolor:'#0d1117', font:{color:'#e6edf3',size:11}, margin:{l:10,r:10,b:10,t:10},
+    legend:{bgcolor:'#161b22',bordercolor:'#30363d',borderwidth:1,font:{size:11}},
+    scene:{
+      bgcolor:'#0d1117',
+      xaxis:{title:'Easting X (m)',gridcolor:'#30363d',linecolor:'#30363d',color:'#8b949e'},
+      yaxis:{title:'Northing Y (m)',gridcolor:'#30363d',linecolor:'#30363d',color:'#8b949e'},
+      zaxis:{title:'True Vertical Depth TVD (m)',autorange:'reversed',gridcolor:'#30363d',linecolor:'#30363d',color:'#8b949e'},
+      aspectmode:'data'
+    }
+  };
+
+  if (isPlotInitialized) {
+    Plotly.react('plot', data, layout);
+  } else {
+    Plotly.newPlot('plot', data, layout, {displayModeBar:false, responsive: true});
+    isPlotInitialized = true;
+  }
+  restoreVisibility();
+}
+
+// ═══════════════════════════════════════════════
+//  EVENT LISTENERS
+// ═══════════════════════════════════════════════
+document.getElementById('tt-group').addEventListener('change', e=>{
+  if(e.target.classList.contains('tt-option')){ e.target.closest('.tt-toggle').classList.toggle('on',e.target.checked); updatePlot(); }
+});
+document.querySelectorAll('input[type=number]').forEach(el=>el.addEventListener('change',updatePlot));
+
+document.getElementById('btnPlan').addEventListener('click',()=>{ currentView='Plan'; document.getElementById('btnPlan').className='btn active'; document.getElementById('btnSection').className='btn'; document.getElementById('btn3D').className='btn'; isPlotInitialized=false; updatePlot(); });
+document.getElementById('btnSection').addEventListener('click',()=>{ currentView='Section'; document.getElementById('btnSection').className='btn active'; document.getElementById('btnPlan').className='btn'; document.getElementById('btn3D').className='btn'; isPlotInitialized=false; updatePlot(); });
+document.getElementById('btn3D').addEventListener('click',()=>{ currentView='3D'; document.getElementById('btn3D').className='btn active'; document.getElementById('btnPlan').className='btn'; document.getElementById('btnSection').className='btn'; isPlotInitialized=false; updatePlot(); });
+
+document.getElementById('wellSelector').addEventListener('change',e=>{
+  const sel=e.target.value; if(!sel) return;
+  const selWell=wells.find(w=>w.name===sel); if(!selWell) return;
+  wells.forEach((w,wi)=>{ w.MD.forEach((_,pi)=>{
+    const px=w.x[pi],py=w.y[pi],pz=w.z[pi]; let minD=Infinity;
+    selWell.x.forEach((sx,j)=>{ const d=Math.sqrt((px-sx)**2+(py-selWell.y[j])**2+(pz-selWell.z[j])**2); if(d<minD) minD=d; });
+    if(traces[wi] && traces[wi].customdata && traces[wi].customdata[pi]) traces[wi].customdata[pi].dist_selected=minD;
+  }); });
+  updatePlot();
+});
+
+document.getElementById('log-toggle').addEventListener('click',e=>{ e.stopPropagation(); const bar=document.getElementById('log-bar'); bar.classList.toggle('expanded'); document.getElementById('log-toggle').textContent=bar.classList.contains('expanded')?'▼ Log':'▲ Log'; if(bar.classList.contains('expanded')) renderLog(); });
+
+// Runtime Bootloader
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    initSQLjs().catch(e=> log('Engine failed: '+e.message,'err'));
+  }, 300);
+});
+</script>
+</body>
+</html>
