@@ -1,5 +1,7 @@
 # WellPath Studio (Portable SQL/WASM Edition)
 
+![3D Visualization](demo.png)
+
 A browser-native application for visualizing directional drilling trajectories,
 managing survey data in SQLite, and performing basic inter-well proximity analysis.
 
